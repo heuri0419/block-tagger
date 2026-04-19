@@ -227,8 +227,6 @@
       <div class="row">
         <label class="file-label" for="fileInput">打开 JSON</label>
         <input id="fileInput" type="file" accept="application/json,.json" />
-
-        <button id="loadDemoBtn" type="button">载入示例数据</button>
         <button id="exportJsonBtn" type="button">导出 JSON</button>
         <button id="exportTextBtn" type="button">导出文本</button>
         <button id="manageTagsBtn" type="button">管理 tag</button>
@@ -306,7 +304,6 @@
     let searchScrollY = 0;
 
     const fileInput = document.getElementById("fileInput");
-    const loadDemoBtn = document.getElementById("loadDemoBtn");
     const exportJsonBtn = document.getElementById("exportJsonBtn");
     const exportTextBtn = document.getElementById("exportTextBtn");
     const manageTagsBtn = document.getElementById("manageTagsBtn");
@@ -863,8 +860,6 @@
         alert("打开 JSON 失败：\n" + error.message);
       }
     });
-
-    loadDemoBtn.addEventListener("click", () => loadBlocks(demoData));
     exportJsonBtn.addEventListener("click", exportJson);
     exportTextBtn.addEventListener("click", exportText);
     clearCacheBtn.addEventListener("click", clearCache);
@@ -910,7 +905,8 @@
       const clickedBlock = event.target.closest(".block");
       const clickedTagManager = event.target.closest("#tagManager");
       const clickedManageBtn = event.target.closest("#manageTagsBtn");
-      if (!clickedBlock && !clickedTagManager && !clickedManageBtn && selectedId !== null) {
+      const clickedTopbar = event.target.closest(".topbar");
+      if (!clickedBlock && !clickedTagManager && !clickedManageBtn && !clickedTopbar && selectedId !== null) {
         selectedId = null;
         inlineCreateOpenForBlockId = null;
         scheduleViewSave();
