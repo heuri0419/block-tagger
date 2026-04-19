@@ -96,6 +96,7 @@
     .stats {
       color: var(--muted);
       font-size: 13px;
+      line-height: 1.5;
     }
 
     .blocks {
@@ -162,7 +163,7 @@
     <div class="topbar panel">
       <div>
         <h1>Block Tag MVP</h1>
-        <p class="hint">MVP 只做：打开 JSON、搜索、单击选中、高亮、加预设 tag「灵感」、导出 JSON / 文本。</p>
+        <p class="hint">MVP 只做：打开 JSON、搜索、单击选中、高亮、切换预设 tag「灵感」、自动缓存、恢复缓存、导出 JSON / 文本。</p>
       </div>
 
       <div class="row">
@@ -172,6 +173,7 @@
         <button id="loadDemoBtn" type="button">载入示例数据</button>
         <button id="exportJsonBtn" type="button">导出 JSON</button>
         <button id="exportTextBtn" type="button">导出文本</button>
+        <button id="clearCacheBtn" type="button">清除缓存</button>
       </div>
 
       <div class="row">
@@ -185,8 +187,11 @@
   </div>
 
   <script>
+    // ===== 基础状态 =====
     const ALLOWED_KEYS = ["id", "original_content", "content", "tags", "source", "meta"];
     const PRESET_TAG = "灵感";
+    const CACHE_KEY = "block_tagger_cache_v1";
+    const CACHE_META_KEY = "block_tagger_meta_v1";
 
     const demoData = [
       {
@@ -215,18 +220,21 @@
       }
     ];
 
-    /** @type {Array<any>} */
     let blocks = [];
     let selectedId = null;
+    let lastSavedAt = null;
+    let saveTimer = null;
 
     const fileInput = document.getElementById("fileInput");
     const loadDemoBtn = document.getElementById("loadDemoBtn");
     const exportJsonBtn = document.getElementById("exportJsonBtn");
     const exportTextBtn = document.getElementById("exportTextBtn");
+    const clearCacheBtn = document.getElementById("clearCacheBtn");
     const searchInput = document.getElementById("searchInput");
     const blocksEl = document.getElementById("blocks");
     const statsEl = document.getElementById("stats");
 
+    // ===== 数据处理 =====
     function normalizeBlock(input, index) {
       const output = {};
       for (const key of ALLOWED_KEYS) {
@@ -268,9 +276,84 @@
       }
       blocks = raw.map(normalizeBlock);
       selectedId = null;
+      scheduleSaveCache();
       render();
     }
 
+    function togglePresetTag(id) {
+      const target = blocks.find((block) => block.id === id);
+      if (!target) return;
+      if (!Array.isArray(target.tags)) target.tags = [];
+
+      if (target.tags.includes(PRESET_TAG)) {
+        target.tags = target.tags.filter((tag) => tag !== PRESET_TAG);
+      } else {
+        target.tags.push(PRESET_TAG);
+      }
+
+      scheduleSaveCache();
+      render();
+    }
+
+    // ===== 缓存 =====
+    function saveCache() {
+      try {
+        const meta = {
+          selectedId,
+          searchText: searchInput.value,
+          lastSavedAt: new Date().toISOString()
+        };
+
+        localStorage.setItem(CACHE_KEY, JSON.stringify(blocks));
+        localStorage.setItem(CACHE_META_KEY, JSON.stringify(meta));
+        lastSavedAt = meta.lastSavedAt;
+        renderStatsOnly();
+      } catch (error) {
+        console.error("保存缓存失败", error);
+      }
+    }
+
+    function scheduleSaveCache() {
+      window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(saveCache, 300);
+    }
+
+    function loadCache() {
+      try {
+        const rawBlocks = localStorage.getItem(CACHE_KEY);
+        const rawMeta = localStorage.getItem(CACHE_META_KEY);
+        if (!rawBlocks) return false;
+
+        const parsedBlocks = JSON.parse(rawBlocks);
+        const parsedMeta = rawMeta ? JSON.parse(rawMeta) : {};
+
+        if (!Array.isArray(parsedBlocks)) return false;
+
+        blocks = parsedBlocks.map(normalizeBlock);
+        selectedId = typeof parsedMeta.selectedId === "string" ? parsedMeta.selectedId : null;
+        searchInput.value = typeof parsedMeta.searchText === "string" ? parsedMeta.searchText : "";
+        lastSavedAt = typeof parsedMeta.lastSavedAt === "string" ? parsedMeta.lastSavedAt : null;
+        return true;
+      } catch (error) {
+        console.error("读取缓存失败", error);
+        return false;
+      }
+    }
+
+    function clearCache() {
+      const confirmed = window.confirm(
+        "确认清除本地缓存吗？\n\n清除后，本地自动保存的工作状态会消失。\n已导出的 JSON 文件不受影响。\n未导出的修改可能无法恢复。"
+      );
+
+      if (!confirmed) return;
+
+      localStorage.removeItem(CACHE_KEY);
+      localStorage.removeItem(CACHE_META_KEY);
+      lastSavedAt = null;
+      loadBlocks(demoData);
+    }
+
+    // ===== 渲染 =====
     function getFilteredBlocks() {
       const keyword = searchInput.value.trim().toLowerCase();
       if (!keyword) return blocks;
@@ -283,10 +366,22 @@
       });
     }
 
+    function formatTime(isoString) {
+      if (!isoString) return "尚未缓存";
+      const date = new Date(isoString);
+      if (Number.isNaN(date.getTime())) return "尚未缓存";
+      return date.toLocaleString();
+    }
+
+    function renderStatsOnly() {
+      const filtered = getFilteredBlocks();
+      statsEl.textContent = `当前 ${blocks.length} 个块，显示 ${filtered.length} 个。本地缓存：已启用。上次自动保存：${formatTime(lastSavedAt)}。`;
+    }
+
     function render() {
       const filtered = getFilteredBlocks();
       blocksEl.innerHTML = "";
-      statsEl.textContent = `当前 ${blocks.length} 个块，显示 ${filtered.length} 个。`;
+      renderStatsOnly();
 
       if (filtered.length === 0) {
         const empty = document.createElement("div");
@@ -319,10 +414,12 @@
 
         const tagBtn = document.createElement("button");
         tagBtn.type = "button";
-        tagBtn.textContent = PRESET_TAG;
+        tagBtn.textContent = block.tags.includes(PRESET_TAG)
+          ? `取消标签：${PRESET_TAG}`
+          : `加标签：${PRESET_TAG}`;
         tagBtn.addEventListener("click", (event) => {
           event.stopPropagation();
-          addPresetTag(block.id);
+          togglePresetTag(block.id);
         });
 
         toolbar.append(label, tagBtn);
@@ -330,6 +427,7 @@
 
         item.addEventListener("click", () => {
           selectedId = block.id;
+          scheduleSaveCache();
           render();
         });
 
@@ -337,16 +435,7 @@
       }
     }
 
-    function addPresetTag(id) {
-      const target = blocks.find((block) => block.id === id);
-      if (!target) return;
-      if (!Array.isArray(target.tags)) target.tags = [];
-      if (!target.tags.includes(PRESET_TAG)) {
-        target.tags.push(PRESET_TAG);
-      }
-      render();
-    }
-
+    // ===== 导入导出 =====
     function downloadFile(filename, content, type) {
       const blob = new Blob([content], { type });
       const url = URL.createObjectURL(blob);
@@ -374,6 +463,7 @@
       downloadFile("blocks_tagged.txt", text, "text/plain;charset=utf-8");
     }
 
+    // ===== 事件绑定 =====
     fileInput.addEventListener("change", async (event) => {
       const file = event.target.files?.[0];
       if (!file) return;
@@ -389,9 +479,18 @@
     loadDemoBtn.addEventListener("click", () => loadBlocks(demoData));
     exportJsonBtn.addEventListener("click", exportJson);
     exportTextBtn.addEventListener("click", exportText);
-    searchInput.addEventListener("input", render);
+    clearCacheBtn.addEventListener("click", clearCache);
+    searchInput.addEventListener("input", () => {
+      scheduleSaveCache();
+      render();
+    });
 
-    loadBlocks(demoData);
+    // ===== 启动 =====
+    const restored = loadCache();
+    if (!restored) {
+      blocks = demoData.map(normalizeBlock);
+    }
+    render();
   </script>
 </body>
 </html>
