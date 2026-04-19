@@ -72,7 +72,7 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 10px 12px;
-      font-size: 14px;
+      font-size: 16px;
       background: #fff;
     }
 
@@ -83,7 +83,7 @@
       color: var(--text);
       border-radius: 10px;
       padding: 10px 12px;
-      font-size: 14px;
+      font-size: 16px;
       cursor: pointer;
     }
 
@@ -201,7 +201,7 @@
     }
 
     .tag-name {
-      font-size: 14px;
+      font-size: 16px;
     }
 
     .tag-delete {
@@ -299,6 +299,9 @@
     let tagManagerOpen = false;
     let inlineCreateOpenForBlockId = null;
     let managerCreateOpen = false;
+    let lastSearchMode = false;
+    let normalScrollY = 0;
+    let searchScrollY = 0;
 
     const fileInput = document.getElementById("fileInput");
     const loadDemoBtn = document.getElementById("loadDemoBtn");
@@ -482,9 +485,9 @@
           searchText: searchInput.value,
           tagSearchText: tagSearchInput.value,
           scrollY: window.scrollY,
-          tagManagerOpen,
-          inlineCreateOpenForBlockId,
-          managerCreateOpen
+          normalScrollY,
+          searchScrollY,
+          inlineCreateOpenForBlockId
         };
         localStorage.setItem(CACHE_VIEW_KEY, JSON.stringify(payload));
       } catch (error) {
@@ -505,9 +508,10 @@
         selectedId = typeof payload.selectedId === "string" ? payload.selectedId : null;
         searchInput.value = typeof payload.searchText === "string" ? payload.searchText : "";
         tagSearchInput.value = typeof payload.tagSearchText === "string" ? payload.tagSearchText : "";
-        tagManagerOpen = Boolean(payload.tagManagerOpen);
         inlineCreateOpenForBlockId = typeof payload.inlineCreateOpenForBlockId === "string" ? payload.inlineCreateOpenForBlockId : null;
-        managerCreateOpen = Boolean(payload.managerCreateOpen);
+        normalScrollY = typeof payload.normalScrollY === "number" ? payload.normalScrollY : 0;
+        searchScrollY = typeof payload.searchScrollY === "number" ? payload.searchScrollY : 0;
+        lastSearchMode = searchInput.value.trim().length > 0;
 
         requestAnimationFrame(() => {
           if (typeof payload.scrollY === "number") {
@@ -530,9 +534,10 @@
       localStorage.removeItem(CACHE_VIEW_KEY);
       lastDataSavedAt = null;
       allTags = [...DEFAULT_TAGS];
-      tagManagerOpen = false;
       inlineCreateOpenForBlockId = null;
-      managerCreateOpen = false;
+      lastSearchMode = false;
+      normalScrollY = 0;
+      searchScrollY = 0;
       loadBlocks(demoData);
       window.scrollTo({ top: 0, behavior: "auto" });
     }
@@ -561,6 +566,33 @@
       const date = new Date(isoString);
       if (Number.isNaN(date.getTime())) return "尚未保存数据";
       return date.toLocaleString();
+    }
+
+    function isSearchMode() {
+      return searchInput.value.trim().length > 0;
+    }
+
+    function updateScrollBucketFromCurrentState() {
+      if (isSearchMode()) {
+        searchScrollY = window.scrollY;
+      } else {
+        normalScrollY = window.scrollY;
+      }
+    }
+
+    function handleSearchModeTransition() {
+      const currentSearchMode = isSearchMode();
+      if (currentSearchMode === lastSearchMode) return;
+
+      updateScrollBucketFromCurrentState();
+      const targetScrollY = currentSearchMode ? searchScrollY : normalScrollY;
+      lastSearchMode = currentSearchMode;
+
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: targetScrollY, behavior: "auto" });
+        updateScrollBucketFromCurrentState();
+        scheduleViewSave();
+      });
     }
 
     function renderStatsOnly() {
@@ -813,6 +845,7 @@
     });
 
     searchInput.addEventListener("input", () => {
+      handleSearchModeTransition();
       scheduleViewSave();
       render();
     });
@@ -823,10 +856,12 @@
     });
 
     window.addEventListener("scroll", () => {
+      updateScrollBucketFromCurrentState();
       scheduleViewSave();
     }, { passive: true });
 
     window.addEventListener("pagehide", () => {
+      updateScrollBucketFromCurrentState();
       saveViewState();
       if (dataSaveTimer) {
         window.clearTimeout(dataSaveTimer);
@@ -853,6 +888,7 @@
       allTags = [...DEFAULT_TAGS];
     }
     loadViewState();
+    lastSearchMode = isSearchMode();
     render();
   </script>
 </body>
