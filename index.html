@@ -135,7 +135,8 @@
       word-break: break-word;
     }
 
-    .toolbar {
+    .toolbar,
+    .tag-manager {
       display: none;
       margin-top: 12px;
       padding-top: 12px;
@@ -145,16 +146,19 @@
       align-items: stretch;
     }
 
-    .block.selected .toolbar {
+    .block.selected .toolbar,
+    .tag-manager.open {
       display: flex;
     }
 
-    .toolbar .label {
+    .toolbar .label,
+    .tag-manager .label {
       color: var(--muted);
       font-size: 13px;
     }
 
-    .tag-panel {
+    .tag-panel,
+    .tag-manager-panel {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
@@ -166,16 +170,43 @@
       border-color: var(--tag-active-border);
     }
 
-    .tag-manage-row {
+    .tag-add-row,
+    .tag-manager-row {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
     }
 
-    .tag-input {
+    .tag-input,
+    .tag-search-input {
       min-width: 160px;
       flex: 1;
+    }
+
+    .tag-create-toggle {
+      min-width: 44px;
+      text-align: center;
+      font-weight: 600;
+    }
+
+    .tag-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 8px;
+      background: #fff;
+    }
+
+    .tag-name {
+      font-size: 14px;
+    }
+
+    .tag-delete {
+      padding: 4px 8px;
+      font-size: 12px;
     }
 
     .empty {
@@ -200,6 +231,7 @@
         <button id="loadDemoBtn" type="button">载入示例数据</button>
         <button id="exportJsonBtn" type="button">导出 JSON</button>
         <button id="exportTextBtn" type="button">导出文本</button>
+        <button id="manageTagsBtn" type="button">管理 tag</button>
         <button id="clearCacheBtn" type="button">清除缓存</button>
       </div>
 
@@ -208,6 +240,17 @@
       </div>
 
       <div class="stats" id="stats"></div>
+
+      <div class="tag-manager" id="tagManager">
+        <div class="label">管理 tag</div>
+        <div class="tag-manager-row">
+          <input id="tagSearchInput" class="tag-search-input" type="text" placeholder="搜索 tag" />
+        </div>
+        <div class="tag-manager-row" id="tagManagerCreateRow">
+          <button id="managerCreateToggleBtn" class="tag-create-toggle" type="button">＋</button>
+        </div>
+        <div class="tag-manager-panel" id="tagManagerPanel"></div>
+      </div>
     </div>
 
     <div class="blocks" id="blocks"></div>
@@ -216,8 +259,8 @@
   <script>
     // ===== 基础状态 =====
     const ALLOWED_KEYS = ["id", "original_content", "content", "tags", "source", "meta"];
-    const CACHE_KEY = "block_tagger_cache_v2";
-    const CACHE_META_KEY = "block_tagger_meta_v2";
+    const CACHE_DATA_KEY = "block_tagger_data_v3";
+    const CACHE_VIEW_KEY = "block_tagger_view_v3";
     const DEFAULT_TAGS = ["灵感"];
 
     const demoData = [
@@ -249,17 +292,26 @@
 
     let blocks = [];
     let selectedId = null;
-    let lastSavedAt = null;
-    let saveTimer = null;
-    let scrollTimer = null;
-    let allTags = [...DEFAULT_TAGS];
+    let lastDataSavedAt = null;
+    let dataSaveTimer = null;
+    let viewSaveTimer = null;
+    let allTags = [];
+    let tagManagerOpen = false;
+    let inlineCreateOpenForBlockId = null;
+    let managerCreateOpen = false;
 
     const fileInput = document.getElementById("fileInput");
     const loadDemoBtn = document.getElementById("loadDemoBtn");
     const exportJsonBtn = document.getElementById("exportJsonBtn");
     const exportTextBtn = document.getElementById("exportTextBtn");
+    const manageTagsBtn = document.getElementById("manageTagsBtn");
     const clearCacheBtn = document.getElementById("clearCacheBtn");
     const searchInput = document.getElementById("searchInput");
+    const tagSearchInput = document.getElementById("tagSearchInput");
+    const tagManager = document.getElementById("tagManager");
+    const tagManagerPanel = document.getElementById("tagManagerPanel");
+    const tagManagerCreateRow = document.getElementById("tagManagerCreateRow");
+    const managerCreateToggleBtn = document.getElementById("managerCreateToggleBtn");
     const blocksEl = document.getElementById("blocks");
     const statsEl = document.getElementById("stats");
 
@@ -304,14 +356,22 @@
       return output;
     }
 
-    function refreshAllTags() {
-      const fromBlocks = new Set(DEFAULT_TAGS);
-      for (const block of blocks) {
-        for (const tag of block.tags) {
-          fromBlocks.add(tag);
+    function deriveTagsFromBlocks(sourceBlocks) {
+      const set = new Set();
+      for (const block of sourceBlocks) {
+        for (const tag of block.tags || []) {
+          if (typeof tag === "string" && tag.trim()) {
+            set.add(tag.trim());
+          }
         }
       }
-      allTags = Array.from(fromBlocks);
+      return Array.from(set);
+    }
+
+    function ensureTagListNotEmpty() {
+      if (allTags.length === 0) {
+        allTags = [...DEFAULT_TAGS];
+      }
     }
 
     function loadBlocks(raw) {
@@ -320,13 +380,12 @@
       }
       blocks = raw.map(normalizeBlock);
       selectedId = null;
-      refreshAllTags();
-      scheduleSaveCache();
+      inlineCreateOpenForBlockId = null;
+      const importedTags = deriveTagsFromBlocks(blocks);
+      allTags = importedTags.length > 0 ? importedTags : [...DEFAULT_TAGS];
+      scheduleDataSave();
+      scheduleViewSave();
       render();
-    }
-
-    function getSelectedBlock() {
-      return blocks.find((block) => block.id === selectedId) || null;
     }
 
     function toggleTagForBlock(blockId, tagName) {
@@ -340,8 +399,7 @@
         target.tags.push(tagName);
       }
 
-      refreshAllTags();
-      scheduleSaveCache();
+      scheduleDataSave();
       render();
     }
 
@@ -351,7 +409,7 @@
       if (!allTags.includes(normalized)) {
         allTags.push(normalized);
       }
-      scheduleSaveCache();
+      scheduleDataSave();
       render();
       return true;
     }
@@ -367,73 +425,97 @@
         block.tags = block.tags.filter((tag) => tag !== tagName);
       }
 
-      refreshAllTags();
-      scheduleSaveCache();
+      allTags = allTags.filter((tag) => tag !== tagName);
+      ensureTagListNotEmpty();
+      scheduleDataSave();
       render();
     }
 
-    // ===== 缓存 =====
-    function saveCache() {
+    // ===== 缓存：数据层 =====
+    function saveDataCache() {
       try {
-        const meta = {
-          selectedId,
-          searchText: searchInput.value,
-          lastSavedAt: new Date().toISOString(),
-          scrollY: window.scrollY,
-          allTags
+        const payload = {
+          blocks,
+          allTags,
+          lastDataSavedAt: new Date().toISOString()
         };
 
-        localStorage.setItem(CACHE_KEY, JSON.stringify(blocks));
-        localStorage.setItem(CACHE_META_KEY, JSON.stringify(meta));
-        lastSavedAt = meta.lastSavedAt;
+        localStorage.setItem(CACHE_DATA_KEY, JSON.stringify(payload));
+        lastDataSavedAt = payload.lastDataSavedAt;
         renderStatsOnly();
       } catch (error) {
-        console.error("保存缓存失败", error);
+        console.error("保存数据缓存失败", error);
       }
     }
 
-    function scheduleSaveCache() {
-      window.clearTimeout(saveTimer);
-      saveTimer = window.setTimeout(saveCache, 300);
+    function scheduleDataSave() {
+      window.clearTimeout(dataSaveTimer);
+      dataSaveTimer = window.setTimeout(saveDataCache, 300);
     }
 
-    function scheduleScrollSave() {
-      window.clearTimeout(scrollTimer);
-      scrollTimer = window.setTimeout(saveCache, 200);
-    }
-
-    function loadCache() {
+    function loadDataCache() {
       try {
-        const rawBlocks = localStorage.getItem(CACHE_KEY);
-        const rawMeta = localStorage.getItem(CACHE_META_KEY);
-        if (!rawBlocks) return false;
+        const raw = localStorage.getItem(CACHE_DATA_KEY);
+        if (!raw) return false;
 
-        const parsedBlocks = JSON.parse(rawBlocks);
-        const parsedMeta = rawMeta ? JSON.parse(rawMeta) : {};
+        const payload = JSON.parse(raw);
+        if (!payload || !Array.isArray(payload.blocks)) return false;
 
-        if (!Array.isArray(parsedBlocks)) return false;
-
-        blocks = parsedBlocks.map(normalizeBlock);
-        selectedId = typeof parsedMeta.selectedId === "string" ? parsedMeta.selectedId : null;
-        searchInput.value = typeof parsedMeta.searchText === "string" ? parsedMeta.searchText : "";
-        lastSavedAt = typeof parsedMeta.lastSavedAt === "string" ? parsedMeta.lastSavedAt : null;
-
-        if (Array.isArray(parsedMeta.allTags)) {
-          allTags = Array.from(new Set([...DEFAULT_TAGS, ...parsedMeta.allTags.filter((tag) => typeof tag === "string" && tag.trim())]));
-        } else {
-          refreshAllTags();
-        }
-
-        requestAnimationFrame(() => {
-          if (typeof parsedMeta.scrollY === "number") {
-            window.scrollTo({ top: parsedMeta.scrollY, behavior: "auto" });
-          }
-        });
-
+        blocks = payload.blocks.map(normalizeBlock);
+        allTags = Array.isArray(payload.allTags)
+          ? payload.allTags.filter((tag) => typeof tag === "string" && tag.trim()).map((tag) => tag.trim())
+          : deriveTagsFromBlocks(blocks);
+        ensureTagListNotEmpty();
+        lastDataSavedAt = typeof payload.lastDataSavedAt === "string" ? payload.lastDataSavedAt : null;
         return true;
       } catch (error) {
-        console.error("读取缓存失败", error);
+        console.error("读取数据缓存失败", error);
         return false;
+      }
+    }
+
+    // ===== 缓存：界面层 =====
+    function saveViewState() {
+      try {
+        const payload = {
+          selectedId,
+          searchText: searchInput.value,
+          tagSearchText: tagSearchInput.value,
+          scrollY: window.scrollY,
+          tagManagerOpen,
+          inlineCreateOpenForBlockId,
+          managerCreateOpen
+        };
+        localStorage.setItem(CACHE_VIEW_KEY, JSON.stringify(payload));
+      } catch (error) {
+        console.error("保存界面缓存失败", error);
+      }
+    }
+
+    function scheduleViewSave() {
+      window.clearTimeout(viewSaveTimer);
+      viewSaveTimer = window.setTimeout(saveViewState, 200);
+    }
+
+    function loadViewState() {
+      try {
+        const raw = localStorage.getItem(CACHE_VIEW_KEY);
+        if (!raw) return;
+        const payload = JSON.parse(raw);
+        selectedId = typeof payload.selectedId === "string" ? payload.selectedId : null;
+        searchInput.value = typeof payload.searchText === "string" ? payload.searchText : "";
+        tagSearchInput.value = typeof payload.tagSearchText === "string" ? payload.tagSearchText : "";
+        tagManagerOpen = Boolean(payload.tagManagerOpen);
+        inlineCreateOpenForBlockId = typeof payload.inlineCreateOpenForBlockId === "string" ? payload.inlineCreateOpenForBlockId : null;
+        managerCreateOpen = Boolean(payload.managerCreateOpen);
+
+        requestAnimationFrame(() => {
+          if (typeof payload.scrollY === "number") {
+            window.scrollTo({ top: payload.scrollY, behavior: "auto" });
+          }
+        });
+      } catch (error) {
+        console.error("读取界面缓存失败", error);
       }
     }
 
@@ -444,10 +526,13 @@
 
       if (!confirmed) return;
 
-      localStorage.removeItem(CACHE_KEY);
-      localStorage.removeItem(CACHE_META_KEY);
-      lastSavedAt = null;
+      localStorage.removeItem(CACHE_DATA_KEY);
+      localStorage.removeItem(CACHE_VIEW_KEY);
+      lastDataSavedAt = null;
       allTags = [...DEFAULT_TAGS];
+      tagManagerOpen = false;
+      inlineCreateOpenForBlockId = null;
+      managerCreateOpen = false;
       loadBlocks(demoData);
       window.scrollTo({ top: 0, behavior: "auto" });
     }
@@ -465,21 +550,27 @@
       });
     }
 
+    function getFilteredTagList() {
+      const keyword = tagSearchInput.value.trim().toLowerCase();
+      if (!keyword) return allTags;
+      return allTags.filter((tag) => tag.toLowerCase().includes(keyword));
+    }
+
     function formatTime(isoString) {
-      if (!isoString) return "尚未缓存";
+      if (!isoString) return "尚未保存数据";
       const date = new Date(isoString);
-      if (Number.isNaN(date.getTime())) return "尚未缓存";
+      if (Number.isNaN(date.getTime())) return "尚未保存数据";
       return date.toLocaleString();
     }
 
     function renderStatsOnly() {
       const filtered = getFilteredBlocks();
-      statsEl.textContent = `当前 ${blocks.length} 个块，显示 ${filtered.length} 个。tag 数量：${allTags.length}。本地缓存：已启用。上次自动保存：${formatTime(lastSavedAt)}。`;
+      statsEl.textContent = `当前 ${blocks.length} 个块，显示 ${filtered.length} 个。tag 数量：${allTags.length}。数据上次自动保存：${formatTime(lastDataSavedAt)}。`;
     }
 
-    function buildTagManageRow(block) {
-      const manageRow = document.createElement("div");
-      manageRow.className = "tag-manage-row";
+    function buildInlineCreateRow(blockId) {
+      const row = document.createElement("div");
+      row.className = "tag-add-row";
 
       const input = document.createElement("input");
       input.type = "text";
@@ -488,12 +579,14 @@
 
       const addBtn = document.createElement("button");
       addBtn.type = "button";
-      addBtn.textContent = "新建 tag";
+      addBtn.textContent = "确认新建";
       addBtn.addEventListener("click", (event) => {
         event.stopPropagation();
         const ok = addNewTag(input.value);
         if (ok) {
-          input.value = "";
+          inlineCreateOpenForBlockId = null;
+          scheduleViewSave();
+          render();
         }
       });
 
@@ -503,35 +596,84 @@
           event.preventDefault();
           const ok = addNewTag(input.value);
           if (ok) {
-            input.value = "";
+            inlineCreateOpenForBlockId = null;
+            scheduleViewSave();
+            render();
           }
         }
       });
 
-      const deleteLabel = document.createElement("span");
-      deleteLabel.className = "label";
-      deleteLabel.textContent = "删除 tag：";
+      row.append(input, addBtn);
+      return row;
+    }
 
-      manageRow.append(input, addBtn, deleteLabel);
+    function renderTagManager() {
+      tagManager.classList.toggle("open", tagManagerOpen);
+      tagManagerPanel.innerHTML = "";
+      tagManagerCreateRow.querySelectorAll("input, .tag-input-confirm").forEach((node) => node.remove());
 
-      for (const tag of allTags) {
-        const deleteBtn = document.createElement("button");
-        deleteBtn.type = "button";
-        deleteBtn.textContent = `删 ${tag}`;
-        deleteBtn.addEventListener("click", (event) => {
+      if (!tagManagerOpen) return;
+
+      const tags = getFilteredTagList();
+
+      if (managerCreateOpen) {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = "新建 tag";
+        input.className = "tag-input";
+
+        const confirmBtn = document.createElement("button");
+        confirmBtn.type = "button";
+        confirmBtn.className = "tag-input-confirm";
+        confirmBtn.textContent = "确认新建";
+
+        const submit = () => {
+          const ok = addNewTag(input.value);
+          if (ok) {
+            managerCreateOpen = false;
+            scheduleViewSave();
+            render();
+          }
+        };
+
+        confirmBtn.addEventListener("click", submit);
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            submit();
+          }
+        });
+
+        tagManagerCreateRow.append(input, confirmBtn);
+      }
+
+      for (const tag of tags) {
+        const item = document.createElement("div");
+        item.className = "tag-item";
+
+        const name = document.createElement("span");
+        name.className = "tag-name";
+        name.textContent = tag;
+
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "tag-delete";
+        del.textContent = "删除";
+        del.addEventListener("click", (event) => {
           event.stopPropagation();
           deleteTag(tag);
         });
-        manageRow.appendChild(deleteBtn);
-      }
 
-      return manageRow;
+        item.append(name, del);
+        tagManagerPanel.appendChild(item);
+      }
     }
 
     function render() {
       const filtered = getFilteredBlocks();
       blocksEl.innerHTML = "";
       renderStatsOnly();
+      renderTagManager();
 
       if (filtered.length === 0) {
         const empty = document.createElement("div");
@@ -577,17 +719,34 @@
           tagPanel.appendChild(tagBtn);
         }
 
-        const manageRow = buildTagManageRow(block);
+        const createToggleBtn = document.createElement("button");
+        createToggleBtn.type = "button";
+        createToggleBtn.className = "tag-create-toggle";
+        createToggleBtn.textContent = "＋";
+        createToggleBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          inlineCreateOpenForBlockId = inlineCreateOpenForBlockId === block.id ? null : block.id;
+          scheduleViewSave();
+          render();
+        });
+        tagPanel.appendChild(createToggleBtn);
 
-        toolbar.append(label, tagPanel, manageRow);
+        toolbar.append(label, tagPanel);
+
+        if (inlineCreateOpenForBlockId === block.id) {
+          toolbar.appendChild(buildInlineCreateRow(block.id));
+        }
+
         item.append(head, content, toolbar);
 
         item.addEventListener("click", () => {
           if (selectedId === block.id) {
-            return;
+            selectedId = null;
+            inlineCreateOpenForBlockId = null;
+          } else {
+            selectedId = block.id;
           }
-          selectedId = block.id;
-          scheduleSaveCache();
+          scheduleViewSave();
           render();
         });
 
@@ -640,28 +799,60 @@
     exportJsonBtn.addEventListener("click", exportJson);
     exportTextBtn.addEventListener("click", exportText);
     clearCacheBtn.addEventListener("click", clearCache);
-    searchInput.addEventListener("input", () => {
-      scheduleSaveCache();
+
+    manageTagsBtn.addEventListener("click", () => {
+      tagManagerOpen = !tagManagerOpen;
+      scheduleViewSave();
       render();
     });
 
-    window.addEventListener("scroll", scheduleScrollSave, { passive: true });
+    managerCreateToggleBtn.addEventListener("click", () => {
+      managerCreateOpen = !managerCreateOpen;
+      scheduleViewSave();
+      render();
+    });
+
+    searchInput.addEventListener("input", () => {
+      scheduleViewSave();
+      render();
+    });
+
+    tagSearchInput.addEventListener("input", () => {
+      scheduleViewSave();
+      render();
+    });
+
+    window.addEventListener("scroll", () => {
+      scheduleViewSave();
+    }, { passive: true });
+
+    window.addEventListener("pagehide", () => {
+      saveViewState();
+      if (dataSaveTimer) {
+        window.clearTimeout(dataSaveTimer);
+        saveDataCache();
+      }
+    });
 
     document.addEventListener("click", (event) => {
       const clickedBlock = event.target.closest(".block");
-      if (!clickedBlock && selectedId !== null) {
+      const clickedTagManager = event.target.closest("#tagManager");
+      const clickedManageBtn = event.target.closest("#manageTagsBtn");
+      if (!clickedBlock && !clickedTagManager && !clickedManageBtn && selectedId !== null) {
         selectedId = null;
-        scheduleSaveCache();
+        inlineCreateOpenForBlockId = null;
+        scheduleViewSave();
         render();
       }
     });
 
     // ===== 启动 =====
-    const restored = loadCache();
-    if (!restored) {
+    const restoredData = loadDataCache();
+    if (!restoredData) {
       blocks = demoData.map(normalizeBlock);
-      refreshAllTags();
+      allTags = [...DEFAULT_TAGS];
     }
+    loadViewState();
     render();
   </script>
 </body>
