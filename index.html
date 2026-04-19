@@ -12,6 +12,8 @@
       --text: #222;
       --muted: #666;
       --selected: #fff3a3;
+      --tag-active-bg: #ffe47a;
+      --tag-active-border: #d4b100;
       --shadow: 0 1px 2px rgba(0,0,0,0.06);
     }
 
@@ -61,6 +63,7 @@
       color: var(--muted);
       font-size: 13px;
       margin: 0;
+      line-height: 1.5;
     }
 
     input[type="text"] {
@@ -96,7 +99,7 @@
     .stats {
       color: var(--muted);
       font-size: 13px;
-      line-height: 1.5;
+      line-height: 1.6;
     }
 
     .blocks {
@@ -137,18 +140,42 @@
       margin-top: 12px;
       padding-top: 12px;
       border-top: 1px dashed rgba(0,0,0,0.15);
+      gap: 10px;
+      flex-direction: column;
+      align-items: stretch;
     }
 
     .block.selected .toolbar {
       display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
     }
 
     .toolbar .label {
       color: var(--muted);
       font-size: 13px;
+    }
+
+    .tag-panel {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .tag-btn.active {
+      background: var(--tag-active-bg);
+      border-color: var(--tag-active-border);
+    }
+
+    .tag-manage-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .tag-input {
+      min-width: 160px;
+      flex: 1;
     }
 
     .empty {
@@ -163,7 +190,7 @@
     <div class="topbar panel">
       <div>
         <h1>Block Tag MVP</h1>
-        <p class="hint">MVP 只做：打开 JSON、搜索、单击选中、高亮、切换预设 tag「灵感」、自动缓存、恢复缓存、导出 JSON / 文本。</p>
+        <p class="hint">当前版本支持：打开 JSON、搜索、单击选中、高亮、多 tag 管理、新建 tag、删除 tag（二次确认）、自动缓存、恢复缓存、缓存页面位置、导出 JSON / 文本。</p>
       </div>
 
       <div class="row">
@@ -189,9 +216,9 @@
   <script>
     // ===== 基础状态 =====
     const ALLOWED_KEYS = ["id", "original_content", "content", "tags", "source", "meta"];
-    const PRESET_TAG = "灵感";
-    const CACHE_KEY = "block_tagger_cache_v1";
-    const CACHE_META_KEY = "block_tagger_meta_v1";
+    const CACHE_KEY = "block_tagger_cache_v2";
+    const CACHE_META_KEY = "block_tagger_meta_v2";
+    const DEFAULT_TAGS = ["灵感"];
 
     const demoData = [
       {
@@ -224,6 +251,8 @@
     let selectedId = null;
     let lastSavedAt = null;
     let saveTimer = null;
+    let scrollTimer = null;
+    let allTags = [...DEFAULT_TAGS];
 
     const fileInput = document.getElementById("fileInput");
     const loadDemoBtn = document.getElementById("loadDemoBtn");
@@ -259,6 +288,11 @@
         output.tags = [];
       }
 
+      output.tags = output.tags
+        .filter((tag) => typeof tag === "string")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+
       if (typeof output.source !== "string") {
         output.source = "unknown";
       }
@@ -270,27 +304,70 @@
       return output;
     }
 
+    function refreshAllTags() {
+      const fromBlocks = new Set(DEFAULT_TAGS);
+      for (const block of blocks) {
+        for (const tag of block.tags) {
+          fromBlocks.add(tag);
+        }
+      }
+      allTags = Array.from(fromBlocks);
+    }
+
     function loadBlocks(raw) {
       if (!Array.isArray(raw)) {
         throw new Error("JSON 顶层必须是数组。\n例如：[ { ... }, { ... } ]");
       }
       blocks = raw.map(normalizeBlock);
       selectedId = null;
+      refreshAllTags();
       scheduleSaveCache();
       render();
     }
 
-    function togglePresetTag(id) {
-      const target = blocks.find((block) => block.id === id);
+    function getSelectedBlock() {
+      return blocks.find((block) => block.id === selectedId) || null;
+    }
+
+    function toggleTagForBlock(blockId, tagName) {
+      const target = blocks.find((block) => block.id === blockId);
       if (!target) return;
       if (!Array.isArray(target.tags)) target.tags = [];
 
-      if (target.tags.includes(PRESET_TAG)) {
-        target.tags = target.tags.filter((tag) => tag !== PRESET_TAG);
+      if (target.tags.includes(tagName)) {
+        target.tags = target.tags.filter((tag) => tag !== tagName);
       } else {
-        target.tags.push(PRESET_TAG);
+        target.tags.push(tagName);
       }
 
+      refreshAllTags();
+      scheduleSaveCache();
+      render();
+    }
+
+    function addNewTag(tagName) {
+      const normalized = String(tagName || "").trim();
+      if (!normalized) return false;
+      if (!allTags.includes(normalized)) {
+        allTags.push(normalized);
+      }
+      scheduleSaveCache();
+      render();
+      return true;
+    }
+
+    function deleteTag(tagName) {
+      if (!tagName) return;
+      const confirmed = window.confirm(
+        `确认删除 tag「${tagName}」吗？\n\n删除后，它会从 tag 列表中消失，并从所有 block 中一并移除。`
+      );
+      if (!confirmed) return;
+
+      for (const block of blocks) {
+        block.tags = block.tags.filter((tag) => tag !== tagName);
+      }
+
+      refreshAllTags();
       scheduleSaveCache();
       render();
     }
@@ -301,7 +378,9 @@
         const meta = {
           selectedId,
           searchText: searchInput.value,
-          lastSavedAt: new Date().toISOString()
+          lastSavedAt: new Date().toISOString(),
+          scrollY: window.scrollY,
+          allTags
         };
 
         localStorage.setItem(CACHE_KEY, JSON.stringify(blocks));
@@ -316,6 +395,11 @@
     function scheduleSaveCache() {
       window.clearTimeout(saveTimer);
       saveTimer = window.setTimeout(saveCache, 300);
+    }
+
+    function scheduleScrollSave() {
+      window.clearTimeout(scrollTimer);
+      scrollTimer = window.setTimeout(saveCache, 200);
     }
 
     function loadCache() {
@@ -333,6 +417,19 @@
         selectedId = typeof parsedMeta.selectedId === "string" ? parsedMeta.selectedId : null;
         searchInput.value = typeof parsedMeta.searchText === "string" ? parsedMeta.searchText : "";
         lastSavedAt = typeof parsedMeta.lastSavedAt === "string" ? parsedMeta.lastSavedAt : null;
+
+        if (Array.isArray(parsedMeta.allTags)) {
+          allTags = Array.from(new Set([...DEFAULT_TAGS, ...parsedMeta.allTags.filter((tag) => typeof tag === "string" && tag.trim())]));
+        } else {
+          refreshAllTags();
+        }
+
+        requestAnimationFrame(() => {
+          if (typeof parsedMeta.scrollY === "number") {
+            window.scrollTo({ top: parsedMeta.scrollY, behavior: "auto" });
+          }
+        });
+
         return true;
       } catch (error) {
         console.error("读取缓存失败", error);
@@ -350,7 +447,9 @@
       localStorage.removeItem(CACHE_KEY);
       localStorage.removeItem(CACHE_META_KEY);
       lastSavedAt = null;
+      allTags = [...DEFAULT_TAGS];
       loadBlocks(demoData);
+      window.scrollTo({ top: 0, behavior: "auto" });
     }
 
     // ===== 渲染 =====
@@ -375,7 +474,58 @@
 
     function renderStatsOnly() {
       const filtered = getFilteredBlocks();
-      statsEl.textContent = `当前 ${blocks.length} 个块，显示 ${filtered.length} 个。本地缓存：已启用。上次自动保存：${formatTime(lastSavedAt)}。`;
+      statsEl.textContent = `当前 ${blocks.length} 个块，显示 ${filtered.length} 个。tag 数量：${allTags.length}。本地缓存：已启用。上次自动保存：${formatTime(lastSavedAt)}。`;
+    }
+
+    function buildTagManageRow(block) {
+      const manageRow = document.createElement("div");
+      manageRow.className = "tag-manage-row";
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "新建 tag";
+      input.className = "tag-input";
+
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.textContent = "新建 tag";
+      addBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const ok = addNewTag(input.value);
+        if (ok) {
+          input.value = "";
+        }
+      });
+
+      input.addEventListener("keydown", (event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const ok = addNewTag(input.value);
+          if (ok) {
+            input.value = "";
+          }
+        }
+      });
+
+      const deleteLabel = document.createElement("span");
+      deleteLabel.className = "label";
+      deleteLabel.textContent = "删除 tag：";
+
+      manageRow.append(input, addBtn, deleteLabel);
+
+      for (const tag of allTags) {
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.textContent = `删 ${tag}`;
+        deleteBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          deleteTag(tag);
+        });
+        manageRow.appendChild(deleteBtn);
+      }
+
+      return manageRow;
     }
 
     function render() {
@@ -410,22 +560,32 @@
 
         const label = document.createElement("span");
         label.className = "label";
-        label.textContent = "可选择的标记符：";
+        label.textContent = "点击 tag 可切换；已有 tag 会高亮：";
 
-        const tagBtn = document.createElement("button");
-        tagBtn.type = "button";
-        tagBtn.textContent = block.tags.includes(PRESET_TAG)
-          ? `取消标签：${PRESET_TAG}`
-          : `加标签：${PRESET_TAG}`;
-        tagBtn.addEventListener("click", (event) => {
-          event.stopPropagation();
-          togglePresetTag(block.id);
-        });
+        const tagPanel = document.createElement("div");
+        tagPanel.className = "tag-panel";
 
-        toolbar.append(label, tagBtn);
+        for (const tag of allTags) {
+          const tagBtn = document.createElement("button");
+          tagBtn.type = "button";
+          tagBtn.className = "tag-btn" + (block.tags.includes(tag) ? " active" : "");
+          tagBtn.textContent = tag;
+          tagBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            toggleTagForBlock(block.id, tag);
+          });
+          tagPanel.appendChild(tagBtn);
+        }
+
+        const manageRow = buildTagManageRow(block);
+
+        toolbar.append(label, tagPanel, manageRow);
         item.append(head, content, toolbar);
 
         item.addEventListener("click", () => {
+          if (selectedId === block.id) {
+            return;
+          }
           selectedId = block.id;
           scheduleSaveCache();
           render();
@@ -485,10 +645,22 @@
       render();
     });
 
+    window.addEventListener("scroll", scheduleScrollSave, { passive: true });
+
+    document.addEventListener("click", (event) => {
+      const clickedBlock = event.target.closest(".block");
+      if (!clickedBlock && selectedId !== null) {
+        selectedId = null;
+        scheduleSaveCache();
+        render();
+      }
+    });
+
     // ===== 启动 =====
     const restored = loadCache();
     if (!restored) {
       blocks = demoData.map(normalizeBlock);
+      refreshAllTags();
     }
     render();
   </script>
