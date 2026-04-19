@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Block Tag MVP</title>
+  <style>
+    :root {
+      --bg: #fafafa;
+      --panel: #ffffff;
+      --border: #d9d9d9;
+      --text: #222;
+      --muted: #666;
+      --selected: #fff3a3;
+      --shadow: 0 1px 2px rgba(0,0,0,0.06);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .app {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 20px 16px 48px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 12px;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin: 0 0 4px;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0;
+    }
+
+    input[type="text"] {
+      min-width: 240px;
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      background: #fff;
+    }
+
+    button,
+    .file-label {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    button:hover,
+    .file-label:hover {
+      background: #f3f3f3;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .stats {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .blocks {
+      display: grid;
+      gap: 12px;
+    }
+
+    .block {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .block.selected {
+      background: var(--selected);
+      border-color: #d4b100;
+    }
+
+    .block-head {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 10px;
+      word-break: break-word;
+    }
+
+    .block-content {
+      white-space: pre-wrap;
+      line-height: 1.55;
+      word-break: break-word;
+    }
+
+    .toolbar {
+      display: none;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed rgba(0,0,0,0.15);
+    }
+
+    .block.selected .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .toolbar .label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 24px 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar panel">
+      <div>
+        <h1>Block Tag MVP</h1>
+        <p class="hint">MVP 只做：打开 JSON、搜索、单击选中、高亮、加预设 tag「灵感」、导出 JSON / 文本。</p>
+      </div>
+
+      <div class="row">
+        <label class="file-label" for="fileInput">打开 JSON</label>
+        <input id="fileInput" type="file" accept="application/json,.json" />
+
+        <button id="loadDemoBtn" type="button">载入示例数据</button>
+        <button id="exportJsonBtn" type="button">导出 JSON</button>
+        <button id="exportTextBtn" type="button">导出文本</button>
+      </div>
+
+      <div class="row">
+        <input id="searchInput" type="text" placeholder="搜索关键词或 tag" />
+      </div>
+
+      <div class="stats" id="stats"></div>
+    </div>
+
+    <div class="blocks" id="blocks"></div>
+  </div>
+
+  <script>
+    const ALLOWED_KEYS = ["id", "original_content", "content", "tags", "source", "meta"];
+    const PRESET_TAG = "灵感";
+
+    const demoData = [
+      {
+        id: "1",
+        original_content: "今天想到一个生态缸结构\n我要往里面放些端足目",
+        content: "今天想到一个生态缸结构\n我要往里面放些端足目",
+        tags: [],
+        source: "manual",
+        meta: {}
+      },
+      {
+        id: "2",
+        original_content: "filehelper: 这个思路可以扩展成系统设计",
+        content: "filehelper: 这个思路可以扩展成系统设计",
+        tags: ["灵感"],
+        source: "wechat",
+        meta: {}
+      },
+      {
+        id: "3",
+        original_content: "tag 不该直接写进正文，应该在导出层再拼接",
+        content: "tag 不该直接写进正文，应该在导出层再拼接",
+        tags: [],
+        source: "note",
+        meta: {}
+      }
+    ];
+
+    /** @type {Array<any>} */
+    let blocks = [];
+    let selectedId = null;
+
+    const fileInput = document.getElementById("fileInput");
+    const loadDemoBtn = document.getElementById("loadDemoBtn");
+    const exportJsonBtn = document.getElementById("exportJsonBtn");
+    const exportTextBtn = document.getElementById("exportTextBtn");
+    const searchInput = document.getElementById("searchInput");
+    const blocksEl = document.getElementById("blocks");
+    const statsEl = document.getElementById("stats");
+
+    function normalizeBlock(input, index) {
+      const output = {};
+      for (const key of ALLOWED_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(input, key)) {
+          output[key] = input[key];
+        }
+      }
+
+      if (typeof output.id !== "string" || !output.id.trim()) {
+        output.id = String(index + 1);
+      }
+
+      if (typeof output.original_content !== "string") {
+        output.original_content = typeof input.content === "string" ? input.content : "";
+      }
+
+      if (typeof output.content !== "string") {
+        output.content = output.original_content;
+      }
+
+      if (!Array.isArray(output.tags)) {
+        output.tags = [];
+      }
+
+      if (typeof output.source !== "string") {
+        output.source = "unknown";
+      }
+
+      if (typeof output.meta !== "object" || output.meta === null || Array.isArray(output.meta)) {
+        output.meta = {};
+      }
+
+      return output;
+    }
+
+    function loadBlocks(raw) {
+      if (!Array.isArray(raw)) {
+        throw new Error("JSON 顶层必须是数组。\n例如：[ { ... }, { ... } ]");
+      }
+      blocks = raw.map(normalizeBlock);
+      selectedId = null;
+      render();
+    }
+
+    function getFilteredBlocks() {
+      const keyword = searchInput.value.trim().toLowerCase();
+      if (!keyword) return blocks;
+
+      return blocks.filter((block) => {
+        const text = (block.content || "").toLowerCase();
+        const tags = (block.tags || []).join(" ").toLowerCase();
+        const source = (block.source || "").toLowerCase();
+        return text.includes(keyword) || tags.includes(keyword) || source.includes(keyword);
+      });
+    }
+
+    function render() {
+      const filtered = getFilteredBlocks();
+      blocksEl.innerHTML = "";
+      statsEl.textContent = `当前 ${blocks.length} 个块，显示 ${filtered.length} 个。`;
+
+      if (filtered.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "panel empty";
+        empty.textContent = "没有匹配的块。";
+        blocksEl.appendChild(empty);
+        return;
+      }
+
+      for (const block of filtered) {
+        const item = document.createElement("div");
+        item.className = "block" + (block.id === selectedId ? " selected" : "");
+        item.dataset.id = block.id;
+
+        const head = document.createElement("div");
+        head.className = "block-head";
+        const tagText = Array.isArray(block.tags) && block.tags.length ? block.tags.join(", ") : "";
+        head.textContent = `[${tagText}] id=${block.id} source=${block.source}`;
+
+        const content = document.createElement("div");
+        content.className = "block-content";
+        content.textContent = block.content;
+
+        const toolbar = document.createElement("div");
+        toolbar.className = "toolbar";
+
+        const label = document.createElement("span");
+        label.className = "label";
+        label.textContent = "可选择的标记符：";
+
+        const tagBtn = document.createElement("button");
+        tagBtn.type = "button";
+        tagBtn.textContent = PRESET_TAG;
+        tagBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          addPresetTag(block.id);
+        });
+
+        toolbar.append(label, tagBtn);
+        item.append(head, content, toolbar);
+
+        item.addEventListener("click", () => {
+          selectedId = block.id;
+          render();
+        });
+
+        blocksEl.appendChild(item);
+      }
+    }
+
+    function addPresetTag(id) {
+      const target = blocks.find((block) => block.id === id);
+      if (!target) return;
+      if (!Array.isArray(target.tags)) target.tags = [];
+      if (!target.tags.includes(PRESET_TAG)) {
+        target.tags.push(PRESET_TAG);
+      }
+      render();
+    }
+
+    function downloadFile(filename, content, type) {
+      const blob = new Blob([content], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function exportJson() {
+      downloadFile(
+        "blocks_tagged.json",
+        JSON.stringify(blocks, null, 2),
+        "application/json;charset=utf-8"
+      );
+    }
+
+    function exportText() {
+      const text = blocks.map((block) => {
+        const tagText = Array.isArray(block.tags) && block.tags.length ? block.tags.join(", ") : "";
+        return `[${tagText}]${block.content}`;
+      }).join("\n\n--------------------\n\n");
+
+      downloadFile("blocks_tagged.txt", text, "text/plain;charset=utf-8");
+    }
+
+    fileInput.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        loadBlocks(parsed);
+      } catch (error) {
+        alert("打开 JSON 失败：\n" + error.message);
+      }
+    });
+
+    loadDemoBtn.addEventListener("click", () => loadBlocks(demoData));
+    exportJsonBtn.addEventListener("click", exportJson);
+    exportTextBtn.addEventListener("click", exportText);
+    searchInput.addEventListener("input", render);
+
+    loadBlocks(demoData);
+  </script>
+</body>
+</html>
