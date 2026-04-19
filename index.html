@@ -292,6 +292,8 @@
 
     let blocks = [];
     let selectedId = null;
+    let mainSelectedId = null;
+    let searchSelectedId = null;
     let lastDataSavedAt = null;
     let dataSaveTimer = null;
     let viewSaveTimer = null;
@@ -482,6 +484,8 @@
       try {
         const payload = {
           selectedId,
+          mainSelectedId,
+          searchSelectedId,
           searchText: searchInput.value,
           tagSearchText: tagSearchInput.value,
           scrollY: window.scrollY,
@@ -506,6 +510,8 @@
         if (!raw) return;
         const payload = JSON.parse(raw);
         selectedId = typeof payload.selectedId === "string" ? payload.selectedId : null;
+        mainSelectedId = typeof payload.mainSelectedId === "string" ? payload.mainSelectedId : null;
+        searchSelectedId = typeof payload.searchSelectedId === "string" ? payload.searchSelectedId : null;
         searchInput.value = typeof payload.searchText === "string" ? payload.searchText : "";
         tagSearchInput.value = typeof payload.tagSearchText === "string" ? payload.tagSearchText : "";
         inlineCreateOpenForBlockId = typeof payload.inlineCreateOpenForBlockId === "string" ? payload.inlineCreateOpenForBlockId : null;
@@ -514,9 +520,7 @@
         lastSearchMode = searchInput.value.trim().length > 0;
 
         requestAnimationFrame(() => {
-          if (typeof payload.scrollY === "number") {
-            window.scrollTo({ top: payload.scrollY, behavior: "auto" });
-          }
+          scrollToSelectedOrFallback();
         });
       } catch (error) {
         console.error("读取界面缓存失败", error);
@@ -585,14 +589,35 @@
       if (currentSearchMode === lastSearchMode) return;
 
       updateScrollBucketFromCurrentState();
-      const targetScrollY = currentSearchMode ? searchScrollY : normalScrollY;
+
+      if (currentSearchMode) {
+        selectedId = searchSelectedId ?? mainSelectedId;
+      } else {
+        selectedId = mainSelectedId;
+        searchSelectedId = null;
+      }
+
       lastSearchMode = currentSearchMode;
 
       requestAnimationFrame(() => {
-        window.scrollTo({ top: targetScrollY, behavior: "auto" });
+        scrollToSelectedOrFallback();
         updateScrollBucketFromCurrentState();
         scheduleViewSave();
       });
+    }
+
+    function scrollToSelectedOrFallback() {
+      const targetId = selectedId;
+      if (targetId) {
+        const el = document.querySelector(`.block[data-id="${targetId}"]`);
+        if (el) {
+          el.scrollIntoView({ block: "center", behavior: "auto" });
+          return;
+        }
+      }
+
+      const targetScrollY = isSearchMode() ? searchScrollY : normalScrollY;
+      window.scrollTo({ top: targetScrollY, behavior: "auto" });
     }
 
     function renderStatsOnly() {
@@ -772,11 +797,23 @@
         item.append(head, content, toolbar);
 
         item.addEventListener("click", () => {
+          const inSearch = isSearchMode();
+
           if (selectedId === block.id) {
             selectedId = null;
             inlineCreateOpenForBlockId = null;
+            if (inSearch) {
+              searchSelectedId = null;
+            } else {
+              mainSelectedId = null;
+            }
           } else {
             selectedId = block.id;
+            if (inSearch) {
+              searchSelectedId = block.id;
+            } else {
+              mainSelectedId = block.id;
+            }
           }
           scheduleViewSave();
           render();
