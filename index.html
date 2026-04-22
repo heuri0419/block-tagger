@@ -900,19 +900,9 @@
         saveDataCache();
       }
     });
+    // 已移除“点击其他位置取消选中”逻辑。
+    // 当前改为：只有再次点击同一个 block，才会取消选中。
 
-    document.addEventListener("click", (event) => {
-      const clickedBlock = event.target.closest(".block");
-      const clickedTagManager = event.target.closest("#tagManager");
-      const clickedManageBtn = event.target.closest("#manageTagsBtn");
-      const clickedTopbar = event.target.closest(".topbar");
-      if (!clickedBlock && !clickedTagManager && !clickedManageBtn && !clickedTopbar && selectedId !== null) {
-        selectedId = null;
-        inlineCreateOpenForBlockId = null;
-        scheduleViewSave();
-        render();
-      }
-    });
 
     // ===== 启动 =====
     const restoredData = loadDataCache();
