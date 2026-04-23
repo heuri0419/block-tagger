@@ -14,10 +14,13 @@
       --selected: #fff3a3;
       --tag-active-bg: #ffe47a;
       --tag-active-border: #d4b100;
-      --shadow: 0 1px 2px rgba(0,0,0,0.06);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+      --menu-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
     }
 
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
@@ -66,14 +69,26 @@
       line-height: 1.5;
     }
 
-    input[type="text"] {
-      min-width: 240px;
+    input[type="text"],
+    textarea {
+      min-width: 160px;
       flex: 1;
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 10px 12px;
       font-size: 16px;
       background: #fff;
+      color: var(--text);
+      font-family: inherit;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      max-height: 50vh;
+      resize: none;
+      overflow-y: auto;
+      line-height: 1.55;
     }
 
     button,
@@ -92,6 +107,13 @@
       background: #f3f3f3;
     }
 
+    .save-btn {
+      min-width: 44px;
+      padding: 8px 10px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
     input[type="file"] {
       display: none;
     }
@@ -108,6 +130,7 @@
     }
 
     .block {
+      position: relative;
       background: #fff;
       border: 1px solid var(--border);
       border-radius: 14px;
@@ -115,6 +138,9 @@
       box-shadow: var(--shadow);
       cursor: pointer;
       transition: background 0.15s ease, border-color 0.15s ease;
+      touch-action: manipulation;
+      -webkit-touch-callout: none;
+      user-select: none;
     }
 
     .block.selected {
@@ -133,6 +159,7 @@
       white-space: pre-wrap;
       line-height: 1.55;
       word-break: break-word;
+      user-select: text;
     }
 
     .toolbar,
@@ -140,7 +167,7 @@
       display: none;
       margin-top: 12px;
       padding-top: 12px;
-      border-top: 1px dashed rgba(0,0,0,0.15);
+      border-top: 1px dashed rgba(0, 0, 0, 0.15);
       gap: 10px;
       flex-direction: column;
       align-items: stretch;
@@ -158,7 +185,8 @@
     }
 
     .tag-panel,
-    .tag-manager-panel {
+    .tag-manager-panel,
+    .block-actions {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
@@ -171,10 +199,22 @@
     }
 
     .tag-add-row,
-    .tag-manager-row {
+    .tag-manager-row,
+    .edit-panel {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
+      align-items: center;
+    }
+
+    .edit-panel {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .edit-head {
+      display: flex;
+      justify-content: flex-end;
       align-items: center;
     }
 
@@ -214,6 +254,30 @@
       text-align: center;
       padding: 24px 12px;
     }
+
+    .action-menu {
+      position: fixed;
+      z-index: 999;
+      min-width: 140px;
+      padding: 6px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--menu-shadow);
+      display: none;
+    }
+
+    .action-menu.open {
+      display: grid;
+      gap: 6px;
+    }
+
+    .action-menu-item {
+      width: 100%;
+      text-align: left;
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
   </style>
 </head>
 <body>
@@ -221,7 +285,7 @@
     <div class="topbar panel">
       <div>
         <h1>Block Tag MVP</h1>
-        <p class="hint">当前版本支持：打开 JSON、搜索、单击选中、高亮、多 tag 管理、新建 tag、删除 tag（二次确认）、自动缓存、恢复缓存、缓存页面位置、导出 JSON / 文本。</p>
+        <p class="hint">当前版本支持：打开 JSON、搜索、单击选中、双击正文编辑、多 tag 管理、新建 tag、自动缓存、恢复缓存、缓存页面位置、导出 JSON / 文本。</p>
       </div>
 
       <div class="row">
@@ -230,6 +294,7 @@
 
         <button id="exportJsonBtn" type="button">导出 JSON</button>
         <button id="exportTextBtn" type="button">导出文本</button>
+        <button id="addBlockBtn" type="button">新增文本块</button>
         <button id="manageTagsBtn" type="button">管理 tag</button>
         <button id="clearCacheBtn" type="button">清除缓存</button>
       </div>
@@ -255,11 +320,16 @@
     <div class="blocks" id="blocks"></div>
   </div>
 
+  <div id="actionMenu" class="action-menu">
+    <button id="addBeforeMenuItem" class="action-menu-item" type="button">在前新增</button>
+    <button id="addAfterMenuItem" class="action-menu-item" type="button">在后新增</button>
+    <button id="deleteMenuItem" class="action-menu-item" type="button">删除</button>
+  </div>
+
   <script>
-    // ===== 基础状态 =====
     const ALLOWED_KEYS = ["id", "original_content", "content", "tags", "source", "meta"];
-    const CACHE_DATA_KEY = "block_tagger_data_v5";
-    const CACHE_VIEW_KEY = "block_tagger_view_v5";
+    const CACHE_DATA_KEY = "block_tagger_data_v8";
+    const CACHE_VIEW_KEY = "block_tagger_view_v8";
     const DEFAULT_TAGS = ["灵感"];
 
     const demoData = [
@@ -289,28 +359,41 @@
       }
     ];
 
-    let blocks = [];
-    let selectedId = null;
-    let mainSelectedId = null;
-    let searchSelectedId = null;
-    let lastDataSavedAt = null;
-    let dataSaveTimer = null;
-    let viewSaveTimer = null;
-    let allTags = [];
-    let tagManagerOpen = false;
-    let inlineCreateOpenForBlockId = null;
-    let managerCreateOpen = false;
-    let lastSearchMode = false;
-    let normalScrollY = 0;
-    let searchScrollY = 0;
-    let searchSession = {
+    const state = {
+      blocks: [],
       selectedId: null,
-      scrollY: 0
+      mainSelectedId: null,
+      searchSelectedId: null,
+      lastDataSavedAt: null,
+      dataSaveTimer: null,
+      viewSaveTimer: null,
+      allTags: [],
+      tagManagerOpen: false,
+      inlineCreateOpenForBlockId: null,
+      managerCreateOpen: false,
+      lastSearchMode: false,
+      normalScrollY: 0,
+      searchScrollY: 0,
+      editingBlockId: null,
+      editingDraftContent: "",
+      longPressTimer: null,
+      longPressTriggeredBlockId: null,
+      searchSession: {
+        selectedId: null,
+        scrollY: 0
+      },
+      actionMenu: {
+        open: false,
+        blockId: null,
+        x: 0,
+        y: 0
+      }
     };
 
     const fileInput = document.getElementById("fileInput");
     const exportJsonBtn = document.getElementById("exportJsonBtn");
     const exportTextBtn = document.getElementById("exportTextBtn");
+    const addBlockBtn = document.getElementById("addBlockBtn");
     const manageTagsBtn = document.getElementById("manageTagsBtn");
     const clearCacheBtn = document.getElementById("clearCacheBtn");
     const searchInput = document.getElementById("searchInput");
@@ -321,8 +404,11 @@
     const managerCreateToggleBtn = document.getElementById("managerCreateToggleBtn");
     const blocksEl = document.getElementById("blocks");
     const statsEl = document.getElementById("stats");
+    const actionMenuEl = document.getElementById("actionMenu");
+    const addBeforeMenuItem = document.getElementById("addBeforeMenuItem");
+    const addAfterMenuItem = document.getElementById("addAfterMenuItem");
+    const deleteMenuItem = document.getElementById("deleteMenuItem");
 
-    // ===== 数据处理 =====
     function normalizeBlock(input, index) {
       const output = {};
       for (const key of ALLOWED_KEYS) {
@@ -376,29 +462,79 @@
     }
 
     function ensureTagListNotEmpty() {
-      if (allTags.length === 0) {
-        allTags = [...DEFAULT_TAGS];
+      if (state.allTags.length === 0) {
+        state.allTags = [...DEFAULT_TAGS];
       }
+    }
+
+    function isSearchMode() {
+      return searchInput.value.trim().length > 0;
+    }
+
+    function syncSelectionAfterChange(blockId) {
+      state.selectedId = blockId;
+      if (isSearchMode()) {
+        state.searchSelectedId = blockId;
+        state.searchSession.selectedId = blockId;
+      } else {
+        state.mainSelectedId = blockId;
+      }
+    }
+
+    function clearSelectionState(blockId) {
+      if (state.selectedId === blockId) state.selectedId = null;
+      if (state.mainSelectedId === blockId) state.mainSelectedId = null;
+      if (state.searchSelectedId === blockId) state.searchSelectedId = null;
+      if (state.searchSession.selectedId === blockId) state.searchSession.selectedId = null;
+    }
+
+    function createNextBlockId() {
+      let maxId = 0;
+      for (const block of state.blocks) {
+        const num = Number.parseInt(block.id, 10);
+        if (!Number.isNaN(num)) {
+          maxId = Math.max(maxId, num);
+        }
+      }
+      return String(maxId + 1);
+    }
+
+    function createTextBlock(partial = {}) {
+      return normalizeBlock(
+        {
+          id: createNextBlockId(),
+          original_content: "",
+          content: "",
+          tags: [],
+          source: "manual",
+          meta: {},
+          ...partial
+        },
+        state.blocks.length
+      );
     }
 
     function loadBlocks(raw) {
       if (!Array.isArray(raw)) {
-        throw new Error("JSON 顶层必须是数组。\n例如：[ { ... }, { ... } ]");
+        throw new Error("JSON 顶层必须是数组。");
       }
-      blocks = raw.map(normalizeBlock);
-      selectedId = null;
-      mainSelectedId = null;
-      searchSelectedId = null;
-      inlineCreateOpenForBlockId = null;
-      const importedTags = deriveTagsFromBlocks(blocks);
-      allTags = importedTags.length > 0 ? importedTags : [...DEFAULT_TAGS];
+      state.blocks = raw.map(normalizeBlock);
+      state.selectedId = null;
+      state.mainSelectedId = null;
+      state.searchSelectedId = null;
+      state.inlineCreateOpenForBlockId = null;
+      state.editingBlockId = null;
+      state.editingDraftContent = "";
+      state.actionMenu.open = false;
+      const importedTags = deriveTagsFromBlocks(state.blocks);
+      state.allTags = importedTags.length > 0 ? importedTags : [...DEFAULT_TAGS];
       scheduleDataSave();
       scheduleViewSave();
       render();
     }
 
     function toggleTagForBlock(blockId, tagName) {
-      const target = blocks.find((block) => block.id === blockId);
+      const target = state.blocks.find((block) => block.id === blockId);
       if (!target) return;
       if (!Array.isArray(target.tags)) target.tags = [];
 
@@ -415,12 +551,111 @@
     function addNewTag(tagName) {
       const normalized = String(tagName || "").trim();
       if (!normalized) return false;
-      if (!allTags.includes(normalized)) {
-        allTags.push(normalized);
+      if (!state.allTags.includes(normalized)) {
+        state.allTags.push(normalized);
       }
       scheduleDataSave();
       render();
       return true;
+    }
+
+    function addBlock(afterBlockId = null) {
+      const newBlock = createTextBlock();
+      const index = afterBlockId ? state.blocks.findIndex((block) => block.id === afterBlockId) : -1;
+
+      if (index >= 0) {
+        state.blocks.splice(index + 1, 0, newBlock);
+      } else {
+        state.blocks.push(newBlock);
+      }
+
+      state.inlineCreateOpenForBlockId = null;
+      state.editingBlockId = newBlock.id;
+      state.editingDraftContent = newBlock.content || "";
+      syncSelectionAfterChange(newBlock.id);
+      scheduleDataSave();
+      scheduleViewSave();
+      render();
+    }
+
+    function addBlockBefore(beforeBlockId = null) {
+      if (!beforeBlockId) {
+        addBlock();
+        return;
+      }
+
+      const newBlock = createTextBlock();
+      const index = state.blocks.findIndex((block) => block.id === beforeBlockId);
+
+      if (index >= 0) {
+        state.blocks.splice(index, 0, newBlock);
+      } else {
+        state.blocks.push(newBlock);
+      }
+
+      state.inlineCreateOpenForBlockId = null;
+      state.editingBlockId = newBlock.id;
+      state.editingDraftContent = newBlock.content || "";
+      syncSelectionAfterChange(newBlock.id);
+      scheduleDataSave();
+      scheduleViewSave();
+      render();
+    }
+
+    function updateBlockContent(blockId, nextContent) {
+      const target = state.blocks.find((block) => block.id === blockId);
+      if (!target) return;
+      target.content = String(nextContent || "");
+      scheduleDataSave();
+      renderStatsOnly();
+    }
+
+    function openEditor(blockId) {
+      const target = state.blocks.find((block) => block.id === blockId);
+      if (!target) return;
+      state.editingBlockId = blockId;
+      state.editingDraftContent = target.content || "";
+      syncSelectionAfterChange(blockId);
+      closeActionMenu();
+      scheduleViewSave();
+      render();
+    }
+
+    function closeEditor() {
+      state.editingBlockId = null;
+      state.editingDraftContent = "";
+      scheduleViewSave();
+      render();
+    }
+
+    function saveEditingBlock() {
+      if (!state.editingBlockId) return;
+      updateBlockContent(state.editingBlockId, state.editingDraftContent);
+      closeEditor();
+    }
+
+    function deleteBlock(blockId) {
+      const target = state.blocks.find((block) => block.id === blockId);
+      if (!target) return;
+
+      const preview = (target.content || "").trim().slice(0, 36);
+      const confirmed = window.confirm(
+        `确认删除这个 block 吗？\n\n${preview ? `内容预览：${preview}` : "这个 block 目前是空的。"}\n\n删除后会从当前工作数据中移除，但原始导入母本不受影响。`
+      );
+      if (!confirmed) return;
+
+      state.blocks = state.blocks.filter((block) => block.id !== blockId);
+      clearSelectionState(blockId);
+      if (state.inlineCreateOpenForBlockId === blockId) state.inlineCreateOpenForBlockId = null;
+      if (state.editingBlockId === blockId) {
+        state.editingBlockId = null;
+        state.editingDraftContent = "";
+      }
+      closeActionMenu();
+
+      scheduleDataSave();
+      scheduleViewSave();
+      render();
     }
 
     function deleteTag(tagName) {
@@ -430,80 +665,132 @@
       );
       if (!confirmed) return;
 
-      for (const block of blocks) {
+      for (const block of state.blocks) {
         block.tags = block.tags.filter((tag) => tag !== tagName);
       }
 
-      allTags = allTags.filter((tag) => tag !== tagName);
+      state.allTags = state.allTags.filter((tag) => tag !== tagName);
       ensureTagListNotEmpty();
       scheduleDataSave();
       render();
     }
 
-    // ===== 搜索 / 位置 / 选中状态 =====
-    function isSearchMode() {
-      return searchInput.value.trim().length > 0;
+    function autoResizeTextarea(textarea) {
+      if (!textarea) return;
+      textarea.style.height = "auto";
+      const maxHeight = Math.floor(window.innerHeight * 0.5);
+      const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+      textarea.style.height = `${Math.max(nextHeight, 120)}px`;
+    }
+
+    function openActionMenu(blockId, x, y) {
+      syncSelectionAfterChange(blockId);
+      state.actionMenu.open = true;
+      state.actionMenu.blockId = blockId;
+      state.actionMenu.x = x;
+      state.actionMenu.y = y;
+      scheduleViewSave();
+      render();
+    }
+
+    function closeActionMenu() {
+      state.actionMenu.open = false;
+      state.actionMenu.blockId = null;
+    }
+
+    function positionActionMenu() {
+      if (!state.actionMenu.open) {
+        actionMenuEl.classList.remove("open");
+        return;
+      }
+
+      actionMenuEl.classList.add("open");
+      actionMenuEl.style.left = "0px";
+      actionMenuEl.style.top = "0px";
+
+      requestAnimationFrame(() => {
+        const menuWidth = actionMenuEl.offsetWidth;
+        const menuHeight = actionMenuEl.offsetHeight;
+        const maxLeft = Math.max(window.innerWidth - menuWidth - 8, 8);
+        const maxTop = Math.max(window.innerHeight - menuHeight - 8, 8);
+        const left = Math.min(Math.max(state.actionMenu.x, 8), maxLeft);
+        const top = Math.min(Math.max(state.actionMenu.y, 8), maxTop);
+        actionMenuEl.style.left = `${left}px`;
+        actionMenuEl.style.top = `${top}px`;
+      });
+    }
+
+    function startActionMenuLongPress(blockId, event) {
+      window.clearTimeout(state.longPressTimer);
+      state.longPressTriggeredBlockId = null;
+      const x = event.clientX || 16;
+      const y = event.clientY || 16;
+      state.longPressTimer = window.setTimeout(() => {
+        state.longPressTriggeredBlockId = blockId;
+        openActionMenu(blockId, x + 8, y + 8);
+      }, 650);
+    }
+
+    function cancelActionMenuLongPress() {
+      window.clearTimeout(state.longPressTimer);
+      state.longPressTimer = null;
     }
 
     function updateScrollBucketFromCurrentState() {
-  if (isSearchMode()) {
-    searchScrollY = window.scrollY;
-    searchSession.scrollY = searchScrollY;
-  } else {
-    normalScrollY = window.scrollY;
-  }
-}
+      if (isSearchMode()) {
+        state.searchScrollY = window.scrollY;
+        state.searchSession.scrollY = state.searchScrollY;
+      } else {
+        state.normalScrollY = window.scrollY;
+      }
+    }
 
     function scrollToSelectedOrFallback() {
-      const targetId = selectedId;
-      if (targetId) {
-        const el = document.querySelector(`.block[data-id="${targetId}"]`);
+      if (state.selectedId) {
+        const el = document.querySelector(`.block[data-id="${state.selectedId}"]`);
         if (el) {
           el.scrollIntoView({ block: "center", behavior: "auto" });
           return;
         }
       }
 
-      const targetScrollY = isSearchMode() ? searchScrollY : normalScrollY;
+      const targetScrollY = isSearchMode() ? state.searchScrollY : state.normalScrollY;
       window.scrollTo({ top: targetScrollY, behavior: "auto" });
     }
 
     function handleSearchModeTransition() {
-  const currentSearchMode = isSearchMode();
-  if (currentSearchMode === lastSearchMode) return;
+      const currentSearchMode = isSearchMode();
+      if (currentSearchMode === state.lastSearchMode) return;
 
-  updateScrollBucketFromCurrentState();
+      updateScrollBucketFromCurrentState();
 
-  if (currentSearchMode) {
-    // 进入搜索：直接尝试恢复上一份搜索态
-    searchSelectedId = searchSession.selectedId;
-    searchScrollY = searchSession.scrollY || 0;
-    selectedId = searchSelectedId ?? mainSelectedId;
-  } else {
-    // 退出搜索：回到主页面选中，但不清空搜索态记录
-    selectedId = mainSelectedId;
-  }
+      if (currentSearchMode) {
+        state.searchSelectedId = state.searchSession.selectedId;
+        state.searchScrollY = state.searchSession.scrollY || 0;
+        state.selectedId = state.searchSelectedId ?? state.mainSelectedId;
+      } else {
+        state.selectedId = state.mainSelectedId;
+      }
 
-  lastSearchMode = currentSearchMode;
+      state.lastSearchMode = currentSearchMode;
 
-  requestAnimationFrame(() => {
-    scrollToSelectedOrFallback();
-    updateScrollBucketFromCurrentState();
-    scheduleViewSave();
-  });
-}
+      requestAnimationFrame(() => {
+        scrollToSelectedOrFallback();
+        updateScrollBucketFromCurrentState();
+        scheduleViewSave();
+      });
+    }
 
-    // ===== 缓存：数据层 =====
     function saveDataCache() {
       try {
         const payload = {
-          blocks,
-          allTags,
+          blocks: state.blocks,
+          allTags: state.allTags,
           lastDataSavedAt: new Date().toISOString()
         };
 
         localStorage.setItem(CACHE_DATA_KEY, JSON.stringify(payload));
-        lastDataSavedAt = payload.lastDataSavedAt;
+        state.lastDataSavedAt = payload.lastDataSavedAt;
         renderStatsOnly();
       } catch (error) {
         console.error("保存数据缓存失败", error);
@@ -511,8 +798,8 @@
     }
 
     function scheduleDataSave() {
-      window.clearTimeout(dataSaveTimer);
-      dataSaveTimer = window.setTimeout(saveDataCache, 300);
+      window.clearTimeout(state.dataSaveTimer);
+      state.dataSaveTimer = window.setTimeout(saveDataCache, 300);
     }
 
     function loadDataCache() {
@@ -523,12 +810,12 @@
         const payload = JSON.parse(raw);
         if (!payload || !Array.isArray(payload.blocks)) return false;
 
-        blocks = payload.blocks.map(normalizeBlock);
-        allTags = Array.isArray(payload.allTags)
+        state.blocks = payload.blocks.map(normalizeBlock);
+        state.allTags = Array.isArray(payload.allTags)
           ? payload.allTags.filter((tag) => typeof tag === "string" && tag.trim()).map((tag) => tag.trim())
-          : deriveTagsFromBlocks(blocks);
+          : deriveTagsFromBlocks(state.blocks);
         ensureTagListNotEmpty();
-        lastDataSavedAt = typeof payload.lastDataSavedAt === "string" ? payload.lastDataSavedAt : null;
+        state.lastDataSavedAt = typeof payload.lastDataSavedAt === "string" ? payload.lastDataSavedAt : null;
         return true;
       } catch (error) {
         console.error("读取数据缓存失败", error);
@@ -536,21 +823,21 @@
       }
     }
 
-    // ===== 缓存：界面层 =====
     function saveViewState() {
       try {
         const payload = {
-  selectedId,
-  mainSelectedId,
-  searchSelectedId,
-  searchText: searchInput.value,
-  tagSearchText: tagSearchInput.value,
-  scrollY: window.scrollY,
-  normalScrollY,
-  searchScrollY,
-  inlineCreateOpenForBlockId,
-  searchSession
-};
+          selectedId: state.selectedId,
+          mainSelectedId: state.mainSelectedId,
+          searchSelectedId: state.searchSelectedId,
+          searchText: searchInput.value,
+          tagSearchText: tagSearchInput.value,
+          normalScrollY: state.normalScrollY,
+          searchScrollY: state.searchScrollY,
+          inlineCreateOpenForBlockId: state.inlineCreateOpenForBlockId,
+          editingBlockId: state.editingBlockId,
+          editingDraftContent: state.editingDraftContent,
+          searchSession: state.searchSession
+        };
         localStorage.setItem(CACHE_VIEW_KEY, JSON.stringify(payload));
       } catch (error) {
         console.error("保存界面缓存失败", error);
@@ -558,38 +845,35 @@
     }
 
     function scheduleViewSave() {
-      window.clearTimeout(viewSaveTimer);
-      viewSaveTimer = window.setTimeout(saveViewState, 200);
+      window.clearTimeout(state.viewSaveTimer);
+      state.viewSaveTimer = window.setTimeout(saveViewState, 200);
     }
 
-function loadViewState() {
-  try {
-    const raw = localStorage.getItem(CACHE_VIEW_KEY);
-    if (!raw) return;
-    const payload = JSON.parse(raw);
+    function loadViewState() {
+      try {
+        const raw = localStorage.getItem(CACHE_VIEW_KEY);
+        if (!raw) return;
+        const payload = JSON.parse(raw);
 
-    selectedId = typeof payload.selectedId === "string" ? payload.selectedId : null;
-    mainSelectedId = typeof payload.mainSelectedId === "string" ? payload.mainSelectedId : null;
-    searchSelectedId = typeof payload.searchSelectedId === "string" ? payload.searchSelectedId : null;
+        state.selectedId = typeof payload.selectedId === "string" ? payload.selectedId : null;
+        state.mainSelectedId = typeof payload.mainSelectedId === "string" ? payload.mainSelectedId : null;
+        state.searchSelectedId = typeof payload.searchSelectedId === "string" ? payload.searchSelectedId : null;
+        state.searchSession = payload.searchSession || { selectedId: null, scrollY: 0 };
+        searchInput.value = typeof payload.searchText === "string" ? payload.searchText : "";
+        tagSearchInput.value = typeof payload.tagSearchText === "string" ? payload.tagSearchText : "";
+        state.normalScrollY = typeof payload.normalScrollY === "number" ? payload.normalScrollY : 0;
+        state.searchScrollY = typeof payload.searchScrollY === "number" ? payload.searchScrollY : 0;
+        state.inlineCreateOpenForBlockId = typeof payload.inlineCreateOpenForBlockId === "string" ? payload.inlineCreateOpenForBlockId : null;
+        state.editingBlockId = typeof payload.editingBlockId === "string" ? payload.editingBlockId : null;
+        state.editingDraftContent = typeof payload.editingDraftContent === "string" ? payload.editingDraftContent : "";
 
-    searchSession = payload.searchSession || {
-      selectedId: null,
-      scrollY: 0
-    };
-
-    searchInput.value = typeof payload.searchText === "string" ? payload.searchText : "";
-    tagSearchInput.value = typeof payload.tagSearchText === "string" ? payload.tagSearchText : "";
-    normalScrollY = typeof payload.normalScrollY === "number" ? payload.normalScrollY : 0;
-    searchScrollY = typeof payload.searchScrollY === "number" ? payload.searchScrollY : 0;
-    inlineCreateOpenForBlockId = typeof payload.inlineCreateOpenForBlockId === "string" ? payload.inlineCreateOpenForBlockId : null;
-
-    requestAnimationFrame(() => {
-      scrollToSelectedOrFallback();
-    });
-  } catch (error) {
-    console.error("读取界面缓存失败", error);
-  }
-}
+        requestAnimationFrame(() => {
+          scrollToSelectedOrFallback();
+        });
+      } catch (error) {
+        console.error("读取界面缓存失败", error);
+      }
+    }
 
     function clearCache() {
       const confirmed = window.confirm(
@@ -600,26 +884,28 @@ function loadViewState() {
 
       localStorage.removeItem(CACHE_DATA_KEY);
       localStorage.removeItem(CACHE_VIEW_KEY);
-      lastDataSavedAt = null;
-      allTags = [...DEFAULT_TAGS];
-      selectedId = null;
-      mainSelectedId = null;
-      searchSelectedId = null;
-      inlineCreateOpenForBlockId = null;
-      lastSearchMode = false;
-      normalScrollY = 0;
-      searchScrollY = 0;
-      searchSession = {selectedId: null, scrollY: 0 };
+      state.lastDataSavedAt = null;
+      state.allTags = [...DEFAULT_TAGS];
+      state.selectedId = null;
+      state.mainSelectedId = null;
+      state.searchSelectedId = null;
+      state.inlineCreateOpenForBlockId = null;
+      state.editingBlockId = null;
+      state.editingDraftContent = "";
+      state.lastSearchMode = false;
+      state.normalScrollY = 0;
+      state.searchScrollY = 0;
+      state.searchSession = { selectedId: null, scrollY: 0 };
+      closeActionMenu();
       loadBlocks(demoData);
       window.scrollTo({ top: 0, behavior: "auto" });
     }
 
-    // ===== 渲染 =====
     function getFilteredBlocks() {
       const keyword = searchInput.value.trim().toLowerCase();
-      if (!keyword) return blocks;
+      if (!keyword) return state.blocks;
 
-      return blocks.filter((block) => {
+      return state.blocks.filter((block) => {
         const text = (block.content || "").toLowerCase();
         const tags = (block.tags || []).join(" ").toLowerCase();
         const source = (block.source || "").toLowerCase();
@@ -629,8 +915,8 @@ function loadViewState() {
 
     function getFilteredTagList() {
       const keyword = tagSearchInput.value.trim().toLowerCase();
-      if (!keyword) return allTags;
-      return allTags.filter((tag) => tag.toLowerCase().includes(keyword));
+      if (!keyword) return state.allTags;
+      return state.allTags.filter((tag) => tag.toLowerCase().includes(keyword));
     }
 
     function formatTime(isoString) {
@@ -642,10 +928,10 @@ function loadViewState() {
 
     function renderStatsOnly() {
       const filtered = getFilteredBlocks();
-      statsEl.textContent = `当前 ${blocks.length} 个块，显示 ${filtered.length} 个。tag 数量：${allTags.length}。数据上次自动保存：${formatTime(lastDataSavedAt)}。`;
+      statsEl.textContent = `当前 ${state.blocks.length} 个块，显示 ${filtered.length} 个。tag 数量：${state.allTags.length}。数据上次自动保存：${formatTime(state.lastDataSavedAt)}。`;
     }
 
-    function buildInlineCreateRow(blockId) {
+    function buildInlineCreateRow() {
       const row = document.createElement("div");
       row.className = "tag-add-row";
       row.addEventListener("click", (event) => {
@@ -673,7 +959,7 @@ function loadViewState() {
         event.stopPropagation();
         const ok = addNewTag(input.value);
         if (ok) {
-          inlineCreateOpenForBlockId = null;
+          state.inlineCreateOpenForBlockId = null;
           scheduleViewSave();
           render();
         }
@@ -688,7 +974,7 @@ function loadViewState() {
           event.preventDefault();
           const ok = addNewTag(input.value);
           if (ok) {
-            inlineCreateOpenForBlockId = null;
+            state.inlineCreateOpenForBlockId = null;
             scheduleViewSave();
             render();
           }
@@ -700,15 +986,15 @@ function loadViewState() {
     }
 
     function renderTagManager() {
-      tagManager.classList.toggle("open", tagManagerOpen);
+      tagManager.classList.toggle("open", state.tagManagerOpen);
       tagManagerPanel.innerHTML = "";
       tagManagerCreateRow.querySelectorAll("input, .tag-input-confirm").forEach((node) => node.remove());
 
-      if (!tagManagerOpen) return;
+      if (!state.tagManagerOpen) return;
 
       const tags = getFilteredTagList();
 
-      if (managerCreateOpen) {
+      if (state.managerCreateOpen) {
         const input = document.createElement("input");
         input.type = "text";
         input.placeholder = "新建 tag";
@@ -722,7 +1008,7 @@ function loadViewState() {
         const submit = () => {
           const ok = addNewTag(input.value);
           if (ok) {
-            managerCreateOpen = false;
+            state.managerCreateOpen = false;
             scheduleViewSave();
             render();
           }
@@ -772,12 +1058,13 @@ function loadViewState() {
         empty.className = "panel empty";
         empty.textContent = "没有匹配的块。";
         blocksEl.appendChild(empty);
+        positionActionMenu();
         return;
       }
 
       for (const block of filtered) {
         const item = document.createElement("div");
-        item.className = "block" + (block.id === selectedId ? " selected" : "");
+        item.className = "block" + (block.id === state.selectedId ? " selected" : "");
         item.dataset.id = block.id;
 
         const head = document.createElement("div");
@@ -788,6 +1075,11 @@ function loadViewState() {
         const content = document.createElement("div");
         content.className = "block-content";
         content.textContent = block.content;
+        content.addEventListener("dblclick", (event) => {
+          event.stopPropagation();
+          event.preventDefault();
+          openEditor(block.id);
+        });
 
         const toolbar = document.createElement("div");
         toolbar.className = "toolbar";
@@ -800,7 +1092,7 @@ function loadViewState() {
 
         const label = document.createElement("span");
         label.className = "label";
-        label.textContent = "点击 tag 可切换；已有 tag 会高亮：";
+        label.textContent = "电脑端右键 block 打开操作；手机端长按 block 打开操作。";
 
         const tagPanel = document.createElement("div");
         tagPanel.className = "tag-panel";
@@ -811,7 +1103,7 @@ function loadViewState() {
           event.stopPropagation();
         });
 
-        for (const tag of allTags) {
+        for (const tag of state.allTags) {
           const tagBtn = document.createElement("button");
           tagBtn.type = "button";
           tagBtn.className = "tag-btn" + (block.tags.includes(tag) ? " active" : "");
@@ -832,7 +1124,7 @@ function loadViewState() {
         createToggleBtn.textContent = "＋";
         createToggleBtn.addEventListener("click", (event) => {
           event.stopPropagation();
-          inlineCreateOpenForBlockId = inlineCreateOpenForBlockId === block.id ? null : block.id;
+          state.inlineCreateOpenForBlockId = state.inlineCreateOpenForBlockId === block.id ? null : block.id;
           scheduleViewSave();
           render();
         });
@@ -843,49 +1135,124 @@ function loadViewState() {
 
         toolbar.append(label, tagPanel);
 
-        if (inlineCreateOpenForBlockId === block.id) {
-          toolbar.appendChild(buildInlineCreateRow(block.id));
+        if (state.inlineCreateOpenForBlockId === block.id) {
+          toolbar.appendChild(buildInlineCreateRow());
+        }
+
+        if (state.editingBlockId === block.id) {
+          const editPanel = document.createElement("div");
+          editPanel.className = "edit-panel";
+          editPanel.addEventListener("click", (event) => {
+            event.stopPropagation();
+          });
+          editPanel.addEventListener("pointerdown", (event) => {
+            event.stopPropagation();
+          });
+
+          const editHead = document.createElement("div");
+          editHead.className = "edit-head";
+
+          const saveBtn = document.createElement("button");
+          saveBtn.type = "button";
+          saveBtn.className = "save-btn";
+          saveBtn.textContent = "保存";
+          saveBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            saveEditingBlock();
+          });
+          saveBtn.addEventListener("pointerdown", (event) => {
+            event.stopPropagation();
+          });
+          editHead.appendChild(saveBtn);
+
+          const textarea = document.createElement("textarea");
+          textarea.value = state.editingDraftContent;
+          textarea.placeholder = "输入这个文本块的内容";
+          textarea.addEventListener("click", (event) => {
+            event.stopPropagation();
+          });
+          textarea.addEventListener("pointerdown", (event) => {
+            event.stopPropagation();
+          });
+          textarea.addEventListener("input", () => {
+            state.editingDraftContent = textarea.value;
+            scheduleViewSave();
+            autoResizeTextarea(textarea);
+          });
+          textarea.addEventListener("keydown", (event) => {
+            event.stopPropagation();
+          });
+          requestAnimationFrame(() => {
+            autoResizeTextarea(textarea);
+          });
+
+          const editHint = document.createElement("div");
+          editHint.className = "label";
+          editHint.textContent = "先单击选中，再双击正文编辑；输入时会自动长高，点右上角保存后才写入当前 block。";
+
+          editPanel.append(editHead, textarea, editHint);
+          toolbar.appendChild(editPanel);
         }
 
         item.append(head, content, toolbar);
 
-        item.addEventListener("click", () => {
-  const inSearch = isSearchMode();
+        item.addEventListener("click", (event) => {
+          if (event.detail > 1) return;
+          if (state.longPressTriggeredBlockId === block.id) {
+            state.longPressTriggeredBlockId = null;
+            return;
+          }
 
-  if (selectedId === block.id) {
-    selectedId = null;
-    inlineCreateOpenForBlockId = null;
+          closeActionMenu();
 
-    if (inSearch) {
-      searchSelectedId = null;
-      searchSession.selectedId = null;
-    } else {
-      mainSelectedId = null;
-    }
-  } else {
-    selectedId = block.id;
+          if (state.selectedId === block.id) {
+            clearSelectionState(block.id);
+            state.inlineCreateOpenForBlockId = null;
+            if (state.editingBlockId === block.id) {
+              state.editingBlockId = null;
+              state.editingDraftContent = "";
+            }
+          } else {
+            syncSelectionAfterChange(block.id);
+          }
 
-    if (inSearch) {
-      searchSelectedId = block.id;
-      searchSession.selectedId = block.id;
-    } else {
-      mainSelectedId = block.id;
-    }
-  }
+          scheduleViewSave();
+          render();
+        });
 
-  scheduleViewSave();
-  render();
-});
+        item.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openActionMenu(block.id, event.clientX + 8, event.clientY + 8);
+        });
+
+        item.addEventListener("pointerdown", (event) => {
+          if (event.pointerType !== "touch") return;
+          if (event.target.closest(".toolbar")) return;
+          if (event.target.closest("textarea, input, button")) return;
+          startActionMenuLongPress(block.id, event);
+        });
+
+        item.addEventListener("pointerup", () => {
+          cancelActionMenuLongPress();
+        });
+        item.addEventListener("pointerleave", () => {
+          cancelActionMenuLongPress();
+        });
+        item.addEventListener("pointercancel", () => {
+          cancelActionMenuLongPress();
+        });
 
         blocksEl.appendChild(item);
       }
+
+      positionActionMenu();
 
       requestAnimationFrame(() => {
         scrollToSelectedOrFallback();
       });
     }
 
-    // ===== 导入导出 =====
     function downloadFile(filename, content, type) {
       const blob = new Blob([content], { type });
       const url = URL.createObjectURL(blob);
@@ -899,21 +1266,22 @@ function loadViewState() {
     function exportJson() {
       downloadFile(
         "blocks_tagged.json",
-        JSON.stringify(blocks, null, 2),
+        JSON.stringify(state.blocks, null, 2),
         "application/json;charset=utf-8"
       );
     }
 
     function exportText() {
-      const text = blocks.map((block) => {
-        const tagText = Array.isArray(block.tags) && block.tags.length ? block.tags.join(", ") : "";
-        return `[${tagText}]${block.content}`;
-      }).join("\n\n--------------------\n\n");
+      const text = state.blocks
+        .map((block) => {
+          const tagText = Array.isArray(block.tags) && block.tags.length ? block.tags.join(", ") : "";
+          return `[${tagText}]${block.content}`;
+        })
+        .join("\n\n--------------------\n\n");
 
       downloadFile("blocks_tagged.txt", text, "text/plain;charset=utf-8");
     }
 
-    // ===== 事件绑定 =====
     fileInput.addEventListener("change", async (event) => {
       const file = event.target.files?.[0];
       if (!file) return;
@@ -928,36 +1296,79 @@ function loadViewState() {
 
     exportJsonBtn.addEventListener("click", exportJson);
     exportTextBtn.addEventListener("click", exportText);
+    addBlockBtn.addEventListener("click", () => {
+      addBlock(state.selectedId);
+    });
     clearCacheBtn.addEventListener("click", clearCache);
 
     manageTagsBtn.addEventListener("click", (event) => {
       event.stopPropagation();
-      tagManagerOpen = !tagManagerOpen;
+      state.tagManagerOpen = !state.tagManagerOpen;
       scheduleViewSave();
       render();
     });
 
     managerCreateToggleBtn.addEventListener("click", (event) => {
       event.stopPropagation();
-      managerCreateOpen = !managerCreateOpen;
+      state.managerCreateOpen = !state.managerCreateOpen;
       scheduleViewSave();
       render();
     });
 
-   searchInput.addEventListener("input", () => {
-  handleSearchModeTransition();
-  scheduleViewSave();
-  render();
-});
+    searchInput.addEventListener("input", () => {
+      handleSearchModeTransition();
+      scheduleViewSave();
+      render();
+    });
 
-    // ===== 启动 =====
+    deleteMenuItem.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const blockId = state.actionMenu.blockId;
+      closeActionMenu();
+      if (blockId) {
+        deleteBlock(blockId);
+      }
+    });
+
+    addAfterMenuItem.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const blockId = state.actionMenu.blockId;
+      closeActionMenu();
+      if (blockId) {
+        addBlock(blockId);
+      } else {
+        addBlock();
+      }
+    });
+
+    addBeforeMenuItem.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const blockId = state.actionMenu.blockId;
+      closeActionMenu();
+      if (blockId) {
+        addBlockBefore(blockId);
+      } else {
+        addBlockBefore();
+      }
+    });
+
+    document.addEventListener("click", (event) => {
+      if (actionMenuEl.contains(event.target)) return;
+      closeActionMenu();
+      positionActionMenu();
+    });
+
+    window.addEventListener("resize", () => {
+      positionActionMenu();
+    });
+
     const restoredData = loadDataCache();
     if (!restoredData) {
-      blocks = demoData.map(normalizeBlock);
-      allTags = [...DEFAULT_TAGS];
+      state.blocks = demoData.map(normalizeBlock);
+      state.allTags = [...DEFAULT_TAGS];
     }
     loadViewState();
-    lastSearchMode = isSearchMode();
+    state.lastSearchMode = isSearchMode();
     render();
   </script>
 </body>
