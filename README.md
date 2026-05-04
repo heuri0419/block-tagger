@@ -1,23 +1,16 @@
 # block-tagger
 
-A simple experimental tool for tagging and managing text blocks, with JSON import/export support.
+A small experimental tool for tagging and managing text blocks, with JSON import/export.
 
-## Status
+## Current state
 
-This project is currently an early prototype.
+This is an early prototype.
 
-The database/import format is not documented yet, because it is still changing and documenting it too early would be annoying to maintain.
+The import/database format is not documented yet because it is still changing. I will add documentation later when the format becomes more stable.
 
-The current version may contain bugs, because the creator has not fully tested the code before publishing it.
+There may be bugs in this version. The code has not been fully tested before being published.
 
-## Features
-
-- Tag text blocks
-- Manage tags
-- Import/export data as JSON
-- Edit and organize block-based notes
-
-## Notes
+## Built with AI assistance
 
 This project was built with help from AI tools.
 
